@@ -12,7 +12,7 @@ from app.core.config import get_settings
 
 
 class Base(DeclarativeBase):
-    """Base declarativa para models SQLAlchemy (Fase 3)."""
+    """Base declarativa para models SQLAlchemy."""
 
 
 def create_engine() -> AsyncEngine:

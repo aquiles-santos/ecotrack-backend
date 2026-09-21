@@ -71,8 +71,16 @@ make clean-venv
 
 ```
 app/
-  main.py           # FastAPI
-  core/config.py    # Settings (pydantic-settings)
+  main.py              # FastAPI
+  core/
+    config.py          # Settings (pydantic-settings)
+    database.py        # SQLAlchemy async engine e sessão
+  models/
+    alert.py           # Alert, ReadingCache e funções de persistência
+  schemas/
+    alert.py           # Schemas Pydantic de alertas
+    air_quality.py     # Schemas Pydantic de qualidade do ar
+alembic/               # Migrações PostgreSQL
 ```
 
 Documentação completa de arquitetura e API externa será expandida nas fases finais do MVP.
