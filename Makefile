@@ -1,4 +1,4 @@
-.PHONY: help up down logs lint test validate shell db-shell clean-venv
+.PHONY: help up down logs lint test validate shell db-shell db-migrate clean-venv
 
 COMPOSE := docker compose
 API := $(COMPOSE) run --rm --no-deps ecotrack-api
@@ -14,6 +14,7 @@ help:
 	@echo "  make test        Pytest no container"
 	@echo "  make shell       Shell interativo no container da API"
 	@echo "  make db-shell    psql no PostgreSQL"
+	@echo "  make db-migrate  Alembic upgrade head (requer ecotrack-db)"
 	@echo "  make clean-venv  Remove .venv local incorreto (ex.: Python 3.8)"
 	@echo ""
 	@echo "Requisito: Docker Desktop em execução (WSL2) ou 'sudo service docker start'"
@@ -41,6 +42,9 @@ shell:
 
 db-shell:
 	$(COMPOSE) exec ecotrack-db psql -U ecotrack -d ecotrack
+
+db-migrate:
+	$(API) alembic upgrade head
 
 clean-venv:
 	rm -rf .venv
