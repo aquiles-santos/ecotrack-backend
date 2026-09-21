@@ -1,0 +1,50 @@
+services:
+  ecotrack-db:
+    image: postgres:18-alpine
+    container_name: ecotrack-db
+    environment:
+      POSTGRES_USER: ecotrack
+      POSTGRES_PASSWORD: ecotrack
+      POSTGRES_DB: ecotrack
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18+: montar em /var/lib/postgresql (não em .../data)
+      - ecotrack_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecotrack -d ecotrack"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ecotrack-net
+
+  ecotrack-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecotrack-api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ecotrack:ecotrack@ecotrack-db:5432/ecotrack
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      ecotrack-db:
+        condition: service_healthy
+    networks:
+      - ecotrack-net
+
+volumes:
+  ecotrack_pgdata:
+
+networks:
+  ecotrack-net:
+    driver: bridge
