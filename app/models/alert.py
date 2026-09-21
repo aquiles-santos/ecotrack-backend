@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from enum import StrEnum
 
 from sqlalchemy import DateTime, Enum, Numeric, String, func, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID, insert
@@ -9,15 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-from app.schemas.alert import AlertCreate, AlertUpdate
-
-
-class TargetPollutant(StrEnum):
-    PM2_5 = "PM2.5"
-    PM10 = "PM10"
-    CO = "CO"
-    NO2 = "NO2"
-    O3 = "O3"
+from app.schemas.alert import AlertCreate, AlertUpdate, TargetPollutant
 
 
 def round_coord(value: float) -> Decimal:
@@ -90,7 +81,7 @@ async def create_alert(session: AsyncSession, data: AlertCreate) -> Alert:
         local_name=data.local_name,
         latitude=data.latitude,
         longitude=data.longitude,
-        target_pollutant=TargetPollutant(data.target_pollutant.value),
+        target_pollutant=data.target_pollutant,
         concentration_limit=data.concentration_limit,
     )
     session.add(alert)
@@ -108,12 +99,16 @@ async def update_alert(
     if alert is None:
         return None
 
-    for field, value in data.model_dump(exclude_unset=True).items():
-        if field == "target_pollutant" and value is not None:
-            enum_value = value.value if hasattr(value, "value") else value
-            setattr(alert, field, TargetPollutant(enum_value))
-        else:
-            setattr(alert, field, value)
+    if data.local_name is not None:
+        alert.local_name = data.local_name
+    if data.latitude is not None:
+        alert.latitude = data.latitude
+    if data.longitude is not None:
+        alert.longitude = data.longitude
+    if data.target_pollutant is not None:
+        alert.target_pollutant = data.target_pollutant
+    if data.concentration_limit is not None:
+        alert.concentration_limit = data.concentration_limit
 
     await session.flush()
     await session.refresh(alert)

@@ -1,3 +1,3 @@
-from app.models.alert import Alert, ReadingCache, TargetPollutant
+from app.models.alert import Alert, ReadingCache
 
-__all__ = ["Alert", "ReadingCache", "TargetPollutant"]
+__all__ = ["Alert", "ReadingCache"]
