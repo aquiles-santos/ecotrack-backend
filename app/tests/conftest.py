@@ -4,7 +4,9 @@ import pytest
 from app.core.config import get_settings
 from app.core.database import Base, get_session
 from app.main import app
+from app.models.alert import Alert, ReadingCache
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -28,6 +30,10 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
     app.dependency_overrides[get_session] = override_get_session
+
+    await session.execute(delete(ReadingCache))
+    await session.execute(delete(Alert))
+    await session.flush()
 
     try:
         yield session
