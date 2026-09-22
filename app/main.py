@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.routers.air_quality_router import router as air_quality_router
 from app.routers.alert_router import router as alert_router
 
 app = FastAPI(
@@ -9,3 +10,4 @@ app = FastAPI(
 )
 
 app.include_router(alert_router, prefix="/api/v1")
+app.include_router(air_quality_router, prefix="/api/v1")
