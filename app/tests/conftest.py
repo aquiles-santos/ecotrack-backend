@@ -1,14 +1,25 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 
+import pytest
 import pytest_asyncio
 from app.core.config import get_settings
 from app.core.database import Base, get_session
 from app.main import app
 from app.models.alert import Alert, ReadingCache
+from app.services.openweather_service import reset_circuit_breaker, set_http_client
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
+
+
+@pytest.fixture(autouse=True)
+def reset_openweather_state() -> Generator[None, None, None]:
+    reset_circuit_breaker()
+    set_http_client(None)
+    yield
+    reset_circuit_breaker()
+    set_http_client(None)
 
 
 @pytest_asyncio.fixture

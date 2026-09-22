@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import DateTime, Enum, Numeric, String, func, select
@@ -9,6 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.schemas.alert import AlertCreate, AlertUpdate, TargetPollutant
+
+CACHE_TTL = timedelta(minutes=10)
 
 
 def round_coord(value: float) -> Decimal:
@@ -59,6 +61,18 @@ class ReadingCache(Base):
         DateTime(timezone=True),
         nullable=False,
     )
+
+
+def is_cache_fresh(
+    cache: ReadingCache,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    reference = now or datetime.now(UTC)
+    fetched_at = cache.fetched_at
+    if fetched_at.tzinfo is None:
+        fetched_at = fetched_at.replace(tzinfo=UTC)
+    return reference - fetched_at <= CACHE_TTL
 
 
 async def list_alerts(
