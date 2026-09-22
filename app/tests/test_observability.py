@@ -22,7 +22,7 @@ def low_throttle_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         OPENWEATHER_API_KEY="test-api-key",
         THROTTLE_RPM=2,
     )
-    monkeypatch.setattr("app.core.config.get_settings", lambda: settings)
+    monkeypatch.setattr("app.core.security.get_settings", lambda: settings)
     get_settings.cache_clear()
 
 
@@ -73,7 +73,7 @@ async def test_unhandled_error_has_no_traceback(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def boom(_lat: float, _lon: float):
+    async def boom(_self: object, lat: float, lon: float) -> None:
         raise RuntimeError("simulated failure")
 
     monkeypatch.setattr(

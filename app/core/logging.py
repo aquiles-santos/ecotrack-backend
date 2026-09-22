@@ -42,14 +42,16 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         latency_ms = round((time.perf_counter() - start) * 1000, 2)
-        level = "error" if response.status_code >= 500 else "info"
-
-        get_logger().bind(
+        logger = get_logger().bind(
             correlation_id=correlation_id,
             route=request.url.path,
             status_code=response.status_code,
             latency_ms=latency_ms,
-        ).log(level, "request_completed")
+        )
+        if response.status_code >= 500:
+            logger.error("request_completed")
+        else:
+            logger.info("request_completed")
 
         response.headers[CORRELATION_ID_HEADER] = correlation_id
         return response
