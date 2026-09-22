@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
 from app.models import alert as alert_repo
 from app.services.openweather_service import (
     OPENWEATHER_RETRY_ATTEMPTS,
@@ -48,19 +48,6 @@ def test_calculate_aqi_from_pm2_5_fair() -> None:
 def test_calculate_aqi_uses_worst_pollutant() -> None:
     pollutants = parse_components({"pm2_5": 5.0, "pm10": 120.0})
     assert calculate_aqi(pollutants) == 4
-
-
-@pytest.fixture
-def openweather_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(
-        DATABASE_URL="postgresql+asyncpg://ecotrack:ecotrack@localhost:5432/ecotrack",
-        OPENWEATHER_API_KEY="test-api-key",
-    )
-    monkeypatch.setattr(
-        "app.services.openweather_service.get_settings",
-        lambda: settings,
-    )
-    get_settings.cache_clear()
 
 
 def _install_openweather_mock(
