@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.core.security import enforce_air_quality_throttle
 from app.schemas.air_quality import AirQualityResponse
 from app.services.openweather_service import OpenWeatherService
 
@@ -27,5 +28,6 @@ async def get_air_quality(
     service: OpenWeatherServiceDep,
     lat: Annotated[float, Query(ge=-90, le=90)],
     lon: Annotated[float, Query(ge=-180, le=180)],
+    _: Annotated[None, Depends(enforce_air_quality_throttle)] = None,
 ) -> AirQualityResponse:
     return await service.get_air_quality(lat=lat, lon=lon)
