@@ -30,3 +30,4 @@ class AirQualityResponse(BaseModel):
     aqi: int = Field(..., ge=1, le=5)
     source: AirQualitySource
     fetched_at: datetime
+    stale: bool = False
