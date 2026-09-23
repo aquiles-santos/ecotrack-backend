@@ -13,10 +13,16 @@ RUN apt-get update \
 COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
 COPY alembic ./alembic
+COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 
 RUN pip install --upgrade pip \
-    && pip install -e ".[dev]"
+    && pip install -e . \
+    && chmod +x scripts/docker-entrypoint.sh \
+    && useradd --create-home --uid 1000 appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
