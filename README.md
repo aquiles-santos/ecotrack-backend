@@ -1,86 +1,157 @@
 # EcoTrack Backend
 
-API principal do EcoTrack — monitoramento de qualidade do ar.
+API principal do **EcoTrack** — plataforma de monitoramento de qualidade do ar (PM2.5, PM10, CO, NO₂, O₃). Expõe CRUD de alertas georreferenciados e consulta assíncrona de poluição via [OpenWeather Air Pollution API](https://openweathermap.org/api/air-pollution), com cache PostgreSQL, Circuit Breaker, throttling e logs estruturados em JSON.
 
-**Requisito:** Python **3.12+** (Ubuntu 20.04 do WSL não inclui 3.12 nos repositórios padrão).
+> **Segurança:** a chave `OPENWEATHER_API_KEY` existe **somente** no backend (`.env`, fora do git). O frontend nunca recebe nem envia a chave.
 
-## Opção A — Docker (recomendado)
+## Stack
 
-Não exige Python 3.12 instalado no host. Toda validação roda em `python:3.12-slim`.
+| Camada          | Tecnologia                               |
+| --------------- | ---------------------------------------- |
+| Runtime         | Python 3.12, FastAPI 0.115+, Uvicorn     |
+| Banco           | PostgreSQL 18, SQLAlchemy async, Alembic |
+| HTTP externo    | HTTPX (timeout 3 s, retries, pybreaker)  |
+| Observabilidade | structlog (JSON), correlation ID         |
+| Qualidade       | Ruff, Pytest + httpx ASGITransport       |
 
-### 1. Subir o Docker
+## Arquitetura (C4)
 
-**WSL2 + Docker Desktop (Windows):**
+### Diagrama de contexto (C4 — nível 1)
 
-1. Abra o **Docker Desktop** no Windows e aguarde ficar *Running*.
-2. *Settings → Resources → WSL Integration* → habilite a integração com sua distro Ubuntu.
-3. No terminal WSL, confirme: `docker info` (deve listar *Server*, não só *Client*).
+```mermaid
+flowchart LR
+    user(["Usuário<br/>Consulta qualidade do ar e gerencia alertas"])
+    ecotrack["EcoTrack<br/>Monitoramento de qualidade do ar"]
+    openweather["OpenWeather<br/>Air Pollution API"]
 
-**Docker Engine nativo no WSL:**
+    user -->|Usa via navegador| ecotrack
+    ecotrack -->|HTTPS: poluição por lat/lon| openweather
 
-```bash
-sudo service docker start
-docker info
+    style openweather fill:#f4f4f4,stroke:#888
 ```
 
-### 2. Configurar e subir a stack
+### Diagrama de containers (C4 — nível 2, backend)
+
+```mermaid
+flowchart TB
+    user(["Usuário"])
+
+    subgraph ecotrack_backend ["ecotrack-backend"]
+        api["ecotrack-api<br/>FastAPI / Uvicorn<br/>Rotas REST, resiliência, cache"]
+        db[("ecotrack-db<br/>PostgreSQL 18<br/>Alertas + cache TTL 10 min")]
+    end
+
+    openweather["OpenWeather<br/>Air Pollution API"]
+
+    user -->|HTTPS /api/v1| api
+    api -->|SQL async asyncpg| db
+    api -->|GET /data/2.5/air_pollution| openweather
+
+    style openweather fill:#f4f4f4,stroke:#888
+```
+
+## Rotas da API
+
+| Método   | Rota                            | Descrição                                        |
+| -------- | ------------------------------- | ------------------------------------------------ |
+| `GET`    | `/api/v1/alerts`                | Lista alertas (paginação, filtro `criticidade`)  |
+| `POST`   | `/api/v1/alerts`                | Cria alerta                                      |
+| `PUT`    | `/api/v1/alerts/{id}`           | Atualiza alerta (parcial)                        |
+| `DELETE` | `/api/v1/alerts/{id}`           | Remove alerta                                    |
+| `GET`    | `/api/v1/air-quality?lat=&lon=` | Qualidade do ar (cache → OpenWeather → fallback) |
+
+Documentação interativa: http://localhost:8000/docs
+
+## API externa — OpenWeather
+
+| Item               | Detalhe                                                                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| **Cadastro**       | https://openweathermap.org/api — criar conta gratuita                                                                   |
+| **Rota utilizada** | `GET https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={key}`                             |
+| **Free tier**      | 60 requisições/minuto (RPM) — o backend aplica throttling (`THROTTLE_RPM`, default 60) na rota `/air-quality`           |
+| **Licença / uso**  | Chave de uso **não comercial** no plano gratuito; consulte os [termos da OpenWeather](https://openweathermap.org/terms) |
+| **Integração**     | Proxy reverso no backend — o cliente **não** é redirecionado à OpenWeather                                              |
+
+## Variáveis de ambiente
+
+Copie o exemplo e ajuste os valores:
 
 ```bash
 cp .env.example .env
-# Edite .env e defina OPENWEATHER_API_KEY quando for integrar a API externa
+```
 
-make up          # build + ecotrack-db + ecotrack-api (porta 8000)
-make validate    # importa app no container Python 3.12
-make lint        # ruff check app
+| Variável              | Obrigatória         | Descrição                                                  |
+| --------------------- | ------------------- | ---------------------------------------------------------- |
+| `DATABASE_URL`        | Sim                 | URL async (`postgresql+asyncpg://...`)                     |
+| `OPENWEATHER_API_KEY` | Para `/air-quality` | Chave da OpenWeather (somente no servidor)                 |
+| `CORS_ORIGINS`        | Não                 | Origens permitidas, separadas por vírgula                  |
+| `THROTTLE_RPM`        | Não                 | Limite de req/min na rota de qualidade do ar (default: 60) |
+
+No Docker Compose, `DATABASE_URL` e `CORS_ORIGINS` já vêm definidos para a rede interna.
+
+## Execução com Docker (recomendado)
+
+Requisito: Docker Engine ou Docker Desktop com integração WSL2.
+
+```bash
+cp .env.example .env
+# Edite .env e defina OPENWEATHER_API_KEY
+
+docker compose up --build
 ```
 
 - API: http://localhost:8000/docs
 - PostgreSQL: `localhost:5432` (user/senha/db: `ecotrack`)
 
+O container `ecotrack-api` executa `alembic upgrade head` automaticamente na subida.
+
+### Comandos úteis (Makefile)
+
 ```bash
+make up          # build + sobe em background
 make down        # para containers
 make logs        # logs da API
-make shell       # bash no container da API
+make lint        # ruff check
+make test        # pytest (requer Postgres acessível)
+make db-migrate  # alembic upgrade head manual
+make shell       # shell no container da API
 make db-shell    # psql no PostgreSQL
 ```
 
-## Opção B — Python 3.12 local (venv)
+## Desenvolvimento local (Python 3.12)
 
-Para desenvolver sem rebuild de imagem a cada mudança de dependência:
+Para iterar sem rebuild de imagem:
 
 ```bash
 chmod +x scripts/setup-local-python.sh
-./scripts/setup-local-python.sh   # instala deadsnakes + cria .venv (requer sudo)
+./scripts/setup-local-python.sh
 source .venv/bin/activate
-ruff check app
+pip install -e ".[dev]"
+
+docker compose up -d ecotrack-db   # só o banco
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-O Postgres pode vir do Compose (`docker compose up -d ecotrack-db`) usando `DATABASE_URL` com `localhost`.
+## CI/CD
 
-## Limpar venv incorreto
+O workflow [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) executa em cada push/PR para `main`:
 
-Se `.venv` foi criado com Python 3.8/3.9:
+1. **Ruff** — lint em `app/`
+2. **Pytest** — testes de integração com serviço PostgreSQL 18
+3. **Docker build** — valida que a imagem compila
+4. **Push GHCR** — publica em `ghcr.io/<owner>/<repo>` apenas em push para `main`
 
-```bash
-make clean-venv
-# Depois: Opção A (Docker) ou Opção B (setup-local-python.sh)
-```
-
-## Estrutura
+## Estrutura do projeto
 
 ```
 app/
-  main.py              # FastAPI
-  core/
-    config.py          # Settings (pydantic-settings)
-    database.py        # SQLAlchemy async engine e sessão
-  models/
-    alert.py           # Alert, ReadingCache e funções de persistência
-  schemas/
-    alert.py           # Schemas Pydantic de alertas
-    air_quality.py     # Schemas Pydantic de qualidade do ar
-alembic/               # Migrações PostgreSQL
+  main.py                 # FastAPI, CORS, exception handlers
+  core/                   # config, database, logging, security
+  models/alert.py         # Alert, ReadingCache + repositório
+  schemas/                # Pydantic (alert, air_quality)
+  routers/                # alert_router, air_quality_router
+  services/               # alert_service, openweather_service
+  tests/                  # conftest, test_alerts, test_air_quality
+alembic/                  # migrações PostgreSQL
 ```
-
-Documentação completa de arquitetura e API externa será expandida nas fases finais do MVP.

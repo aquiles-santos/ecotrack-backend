@@ -2,6 +2,7 @@
 
 COMPOSE := docker compose
 API := $(COMPOSE) run --rm --no-deps ecotrack-api
+DEV_INSTALL := pip install -q -e ".[dev]"
 
 help:
 	@echo "EcoTrack Backend — comandos de desenvolvimento"
@@ -32,10 +33,10 @@ validate:
 	$(API) python -c "from app.main import app; from app.core.config import get_settings; print(app.title, get_settings().throttle_rpm)"
 
 lint:
-	$(API) ruff check app
+	$(API) sh -c "$(DEV_INSTALL) && python -m ruff check app"
 
 test:
-	$(COMPOSE) run --rm ecotrack-api pytest -q
+	$(COMPOSE) run --rm ecotrack-api sh -c "$(DEV_INSTALL) && python -m pytest -q --tb=short"
 
 shell:
 	$(API) bash
