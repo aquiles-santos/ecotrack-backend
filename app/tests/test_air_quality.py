@@ -1,38 +1,24 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import httpx
 import pytest
 from app.core.config import get_settings
 from app.models import alert as alert_repo
+from app.models.alert import CACHE_TTL, ReadingCache, is_cache_fresh, round_coord
+from app.schemas.air_quality import AirQualityQuery
 from app.services.openweather_service import (
     OPENWEATHER_RETRY_ATTEMPTS,
     calculate_aqi,
     get_circuit_breaker,
     parse_components,
+    parse_openweather_payload,
     set_http_client,
 )
+from app.tests.conftest import install_openweather_mock, open_circuit_with_failures
 from httpx import AsyncClient
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-OPENWEATHER_RESPONSE = {
-    "coord": {"lon": -46.6333, "lat": -23.5505},
-    "list": [
-        {
-            "dt": int(datetime.now(UTC).timestamp()),
-            "main": {"aqi": 2},
-            "components": {
-                "co": 261.09,
-                "no": 0.03,
-                "no2": 0.87,
-                "o3": 36.92,
-                "so2": 0.65,
-                "pm2_5": 4.33,
-                "pm10": 8.04,
-                "nh3": 1.85,
-            },
-        }
-    ],
-}
 
 
 def test_calculate_aqi_from_pm2_5_good() -> None:
@@ -50,42 +36,49 @@ def test_calculate_aqi_uses_worst_pollutant() -> None:
     assert calculate_aqi(pollutants) == 4
 
 
-def _install_openweather_mock(
-    *,
-    response: httpx.Response | None = None,
-    side_effect: Exception | None = None,
-) -> tuple[httpx.AsyncClient, list[httpx.Request]]:
-    requests: list[httpx.Request] = []
+def test_calculate_aqi_returns_one_when_no_pollutants() -> None:
+    assert calculate_aqi(parse_components({})) == 1
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert "appid=test-api-key" in str(request.url)
-        if side_effect is not None:
-            raise side_effect
-        return response or httpx.Response(200, json=OPENWEATHER_RESPONSE)
 
-    client = httpx.AsyncClient(
-        transport=httpx.MockTransport(handler),
-        timeout=3.0,
+def test_parse_openweather_payload_raises_on_empty_list() -> None:
+    with pytest.raises(ValueError, match="missing list data"):
+        parse_openweather_payload({"list": []})
+
+
+def test_air_quality_query_rejects_invalid_coordinates() -> None:
+    with pytest.raises(ValidationError):
+        AirQualityQuery(lat=91.0, lon=0.0)
+    with pytest.raises(ValidationError):
+        AirQualityQuery(lat=0.0, lon=181.0)
+
+
+def test_round_coord_normalizes_to_four_decimals() -> None:
+    assert round_coord(-23.55051234) == Decimal("-23.5505")
+    assert round_coord(46.6333789) == Decimal("46.6334")
+
+
+def test_is_cache_fresh_within_ttl() -> None:
+    now = datetime(2026, 3, 21, 12, 0, tzinfo=UTC)
+    cache = ReadingCache(
+        lat=Decimal("-23.5505"),
+        lon=Decimal("-46.6333"),
+        payload_json={},
+        aqi=1,
+        fetched_at=now - CACHE_TTL + timedelta(seconds=1),
     )
-    set_http_client(client)
-    return client, requests
+    assert is_cache_fresh(cache, now=now) is True
 
 
-async def _open_circuit_with_failures(
-    client: AsyncClient,
-    *,
-    lat: float = -23.5505,
-    lon: float = -46.6333,
-) -> None:
-    for _ in range(3):
-        response = await client.get(
-            "/api/v1/air-quality",
-            params={"lat": lat, "lon": lon},
-        )
-        assert response.status_code == 503
-
-    assert get_circuit_breaker().current_state == "open"
+def test_is_cache_fresh_expired_at_boundary() -> None:
+    now = datetime(2026, 3, 21, 12, 0, tzinfo=UTC)
+    cache = ReadingCache(
+        lat=Decimal("-23.5505"),
+        lon=Decimal("-46.6333"),
+        payload_json={},
+        aqi=1,
+        fetched_at=now - CACHE_TTL - timedelta(seconds=1),
+    )
+    assert is_cache_fresh(cache, now=now) is False
 
 
 @pytest.mark.asyncio
@@ -93,7 +86,7 @@ async def test_get_air_quality_returns_standardized_response(
     client: AsyncClient,
     openweather_settings: None,
 ) -> None:
-    mock_client, requests = _install_openweather_mock()
+    mock_client, requests = install_openweather_mock()
     try:
         response = await client.get(
             "/api/v1/air-quality",
@@ -151,7 +144,7 @@ async def test_get_air_quality_returns_fresh_cache_without_http_call(
     db_session: AsyncSession,
     openweather_settings: None,
 ) -> None:
-    mock_client, requests = _install_openweather_mock(
+    mock_client, requests = install_openweather_mock(
         response=httpx.Response(500),
     )
 
@@ -189,7 +182,7 @@ async def test_get_air_quality_second_request_uses_cache_without_http(
     client: AsyncClient,
     openweather_settings: None,
 ) -> None:
-    mock_client, requests = _install_openweather_mock()
+    mock_client, requests = install_openweather_mock()
     params = {"lat": -23.5505, "lon": -46.6333}
 
     try:
@@ -214,7 +207,7 @@ async def test_get_air_quality_expired_cache_refreshes_from_openweather(
     db_session: AsyncSession,
     openweather_settings: None,
 ) -> None:
-    mock_client, requests = _install_openweather_mock()
+    mock_client, requests = install_openweather_mock()
 
     await alert_repo.upsert_cache(
         db_session,
@@ -259,7 +252,7 @@ async def test_get_air_quality_retries_before_failing(
         fast_sleep,
     )
 
-    mock_client, requests = _install_openweather_mock(
+    mock_client, requests = install_openweather_mock(
         side_effect=httpx.TimeoutException("timeout"),
     )
 
@@ -285,12 +278,12 @@ async def test_get_air_quality_open_circuit_skips_http_and_returns_stale_cache(
     db_session: AsyncSession,
     openweather_settings: None,
 ) -> None:
-    mock_client, requests = _install_openweather_mock(
+    mock_client, requests = install_openweather_mock(
         side_effect=httpx.TimeoutException("timeout"),
     )
 
     try:
-        await _open_circuit_with_failures(client)
+        await open_circuit_with_failures(client)
         requests.clear()
 
         await alert_repo.upsert_cache(
@@ -329,16 +322,16 @@ async def test_get_air_quality_circuit_recovers_after_reset_timeout(
     original_reset_timeout = breaker.reset_timeout
     breaker.reset_timeout = 0
 
-    failure_client, _requests = _install_openweather_mock(
+    failure_client, _requests = install_openweather_mock(
         side_effect=httpx.TimeoutException("timeout"),
     )
     success_client: httpx.AsyncClient | None = None
 
     try:
-        await _open_circuit_with_failures(client)
+        await open_circuit_with_failures(client)
         await failure_client.aclose()
 
-        success_client, requests = _install_openweather_mock()
+        success_client, requests = install_openweather_mock()
         response = await client.get(
             "/api/v1/air-quality",
             params={"lat": -23.5505, "lon": -46.6333},
@@ -361,7 +354,7 @@ async def test_get_air_quality_unavailable_without_cache_returns_503(
     client: AsyncClient,
     openweather_settings: None,
 ) -> None:
-    mock_client, _requests = _install_openweather_mock(
+    mock_client, _requests = install_openweather_mock(
         side_effect=httpx.TimeoutException("timeout"),
     )
 
