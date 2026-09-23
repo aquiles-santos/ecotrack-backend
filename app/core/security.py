@@ -57,6 +57,11 @@ def _client_ip(request: Request) -> str:
 
 
 async def enforce_air_quality_throttle(request: Request) -> None:
+    """Aplica THROTTLE_RPM neste processo.
+
+    O contador fica em memória. Vários workers do Uvicorn não compartilham
+    a cota: cada processo permite até THROTTLE_RPM requisições por minuto.
+    """
     settings = get_settings()
     allowed, retry_after = await _rate_limiter.check(
         _client_ip(request),

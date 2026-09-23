@@ -6,7 +6,11 @@ import pytest
 from app.core.config import get_settings
 from app.models import alert as alert_repo
 from app.models.alert import CACHE_TTL, ReadingCache, is_cache_fresh, round_coord
-from app.schemas.air_quality import AirQualityQuery
+from app.schemas.air_quality import (
+    AirQualityQuery,
+    AirQualityResponse,
+    AirQualitySource,
+)
 from app.services.openweather_service import (
     OPENWEATHER_RETRY_ATTEMPTS,
     calculate_aqi,
@@ -43,6 +47,30 @@ def test_calculate_aqi_returns_one_when_no_pollutants() -> None:
 def test_parse_openweather_payload_raises_on_empty_list() -> None:
     with pytest.raises(ValueError, match="missing list data"):
         parse_openweather_payload({"list": []})
+
+
+def test_unavailable_fallback_rejects_numeric_aqi() -> None:
+    with pytest.raises(ValidationError, match="aqi must be absent"):
+        AirQualityResponse(
+            lat=0.0,
+            lon=0.0,
+            pollutants=parse_components({}),
+            aqi=1,
+            source=AirQualitySource.UNAVAILABLE_FALLBACK,
+            fetched_at=datetime(2026, 3, 21, tzinfo=UTC),
+        )
+
+
+def test_measured_air_quality_requires_aqi() -> None:
+    with pytest.raises(ValidationError, match="aqi is required"):
+        AirQualityResponse(
+            lat=0.0,
+            lon=0.0,
+            pollutants=parse_components({"pm2_5": 5.0}),
+            aqi=None,
+            source=AirQualitySource.OPENWEATHER,
+            fetched_at=datetime(2026, 3, 21, tzinfo=UTC),
+        )
 
 
 def test_air_quality_query_rejects_invalid_coordinates() -> None:
@@ -266,8 +294,12 @@ async def test_get_air_quality_retries_before_failing(
         set_http_client(None)
         get_settings.cache_clear()
 
-    assert response.status_code == 503
-    assert response.json()["detail"]["available"] is False
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "unavailable_fallback"
+    assert body["aqi"] is None
+    assert body["stale"] is False
+    assert get_circuit_breaker().current_state == "open"
     assert len(requests) == OPENWEATHER_RETRY_ATTEMPTS
     assert sleep_calls == [0.5, 1.0]
 
@@ -350,7 +382,7 @@ async def test_get_air_quality_circuit_recovers_after_reset_timeout(
 
 
 @pytest.mark.asyncio
-async def test_get_air_quality_unavailable_without_cache_returns_503(
+async def test_get_air_quality_unavailable_without_cache_returns_fallback(
     client: AsyncClient,
     openweather_settings: None,
 ) -> None:
@@ -368,8 +400,11 @@ async def test_get_air_quality_unavailable_without_cache_returns_503(
         set_http_client(None)
         get_settings.cache_clear()
 
-    assert response.status_code == 503
-    detail = response.json()["detail"]
-    assert detail["available"] is False
-    assert detail["message"] == "openweather_unavailable"
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "unavailable_fallback"
+    assert body["stale"] is False
+    assert body["aqi"] is None
+    assert body["lat"] == -23.5505
+    assert body["lon"] == -46.6333
     assert "Traceback" not in response.text

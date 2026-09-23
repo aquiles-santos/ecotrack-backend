@@ -72,6 +72,7 @@ async def test_unhandled_error_has_no_traceback(
     client: AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     async def boom(_self: object, lat: float, lon: float) -> None:
         raise RuntimeError("simulated failure")
@@ -88,6 +89,25 @@ async def test_unhandled_error_has_no_traceback(
     assert response.status_code == 500
     assert response.json() == {"detail": "Internal server error"}
     assert "Traceback" not in response.text
+    assert "simulated failure" not in response.text
+
+    captured = capsys.readouterr()
+    error_logs = [
+        json.loads(line)
+        for line in captured.out.splitlines()
+        if line.strip().startswith("{")
+    ]
+    unhandled = [
+        payload
+        for payload in error_logs
+        if payload.get("event") == "unhandled_exception"
+    ]
+    assert len(unhandled) == 1
+    assert unhandled[0]["error_type"] == "RuntimeError"
+    assert unhandled[0]["error_message"] == "simulated failure"
+    assert unhandled[0]["route"] == "/api/v1/air-quality"
+    assert "correlation_id" in unhandled[0]
+    assert "Traceback" not in captured.out
 
 
 @pytest.mark.asyncio

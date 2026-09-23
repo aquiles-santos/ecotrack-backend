@@ -20,6 +20,15 @@ class Criticality(StrEnum):
     ABOVE_LIMIT = "above_limit"
 
 
+POLLUTANT_FIELD_MAP: dict[TargetPollutant, str] = {
+    TargetPollutant.PM2_5: "pm2_5",
+    TargetPollutant.PM10: "pm10",
+    TargetPollutant.CO: "co",
+    TargetPollutant.NO2: "no2",
+    TargetPollutant.O3: "o3",
+}
+
+
 class AlertCreate(BaseModel):
     local_name: str = Field(..., min_length=1, max_length=255)
     latitude: float = Field(..., ge=-90, le=90)

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import alert as alert_repo
 from app.schemas.air_quality import Pollutants
 from app.schemas.alert import (
+    POLLUTANT_FIELD_MAP,
     AlertCreate,
     AlertRead,
     AlertUpdate,
@@ -13,14 +14,6 @@ from app.schemas.alert import (
     LatestReading,
     TargetPollutant,
 )
-
-POLLUTANT_FIELD_MAP: dict[TargetPollutant, str] = {
-    TargetPollutant.PM2_5: "pm2_5",
-    TargetPollutant.PM10: "pm10",
-    TargetPollutant.CO: "co",
-    TargetPollutant.NO2: "no2",
-    TargetPollutant.O3: "o3",
-}
 
 
 def _parse_pollutants(payload: dict) -> Pollutants:
@@ -64,13 +57,17 @@ def compute_criticality(
 async def build_alert_read(
     session: AsyncSession,
     alert: alert_repo.Alert,
+    cache: alert_repo.ReadingCache | None = None,
+    *,
+    cache_loaded: bool = False,
 ) -> AlertRead:
-    cache = await alert_repo.get_cache(
-        session,
-        float(alert.latitude),
-        float(alert.longitude),
-    )
-    latest_reading = cache_to_latest_reading(cache) if cache else None
+    if not cache_loaded:
+        cache = await alert_repo.get_cache(
+            session,
+            float(alert.latitude),
+            float(alert.longitude),
+        )
+    latest_reading = cache_to_latest_reading(cache) if cache is not None else None
     criticality = compute_criticality(
         alert.target_pollutant,
         alert.concentration_limit,
@@ -100,21 +97,16 @@ class AlertService:
         limit: int = 50,
         criticality: Criticality | None = None,
     ) -> list[AlertRead]:
-        if criticality is None:
-            alerts = await alert_repo.list_alerts(self._session, skip=skip, limit=limit)
-            return [await build_alert_read(self._session, alert) for alert in alerts]
-
-        all_alerts = await alert_repo.list_alerts(
+        rows = await alert_repo.list_alerts(
             self._session,
-            skip=0,
-            limit=10_000,
+            skip=skip,
+            limit=limit,
+            criticality=criticality,
         )
-        filtered: list[AlertRead] = []
-        for alert in all_alerts:
-            alert_read = await build_alert_read(self._session, alert)
-            if alert_read.criticality == criticality:
-                filtered.append(alert_read)
-        return filtered[skip : skip + limit]
+        return [
+            await build_alert_read(self._session, alert, cache, cache_loaded=True)
+            for alert, cache in rows
+        ]
 
     async def create_alert(self, data: AlertCreate) -> AlertRead:
         alert = await alert_repo.create_alert(self._session, data)

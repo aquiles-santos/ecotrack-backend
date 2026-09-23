@@ -54,7 +54,7 @@ flowchart TB
 
 | Método   | Rota                            | Descrição                                        |
 | -------- | ------------------------------- | ------------------------------------------------ |
-| `GET`    | `/api/v1/alerts`                | Lista alertas (paginação, filtro `criticidade`)  |
+| `GET`    | `/api/v1/alerts`                | Lista alertas (paginação, filtro `criticality`)  |
 | `POST`   | `/api/v1/alerts`                | Cria alerta                                      |
 | `PUT`    | `/api/v1/alerts/{id}`           | Atualiza alerta (parcial)                        |
 | `DELETE` | `/api/v1/alerts/{id}`           | Remove alerta                                    |
@@ -85,7 +85,7 @@ cp .env.example .env
 | `DATABASE_URL`        | Sim                 | URL async (`postgresql+asyncpg://...`)                     |
 | `OPENWEATHER_API_KEY` | Para `/air-quality` | Chave da OpenWeather (somente no servidor)                 |
 | `CORS_ORIGINS`        | Não                 | Origens permitidas, separadas por vírgula                  |
-| `THROTTLE_RPM`        | Não                 | Limite de req/min na rota de qualidade do ar (default: 60) |
+| `THROTTLE_RPM`        | Não                 | Limite de req/min na rota de qualidade do ar, por processo (default: 60). Com vários workers a cota não é global. |
 
 No Docker Compose, `DATABASE_URL` e `CORS_ORIGINS` já vêm definidos para a rede interna.
 

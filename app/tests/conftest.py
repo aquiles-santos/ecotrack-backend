@@ -72,7 +72,8 @@ async def open_circuit_with_failures(
             "/api/v1/air-quality",
             params={"lat": lat, "lon": lon},
         )
-        assert response.status_code == 503
+        assert response.status_code == 200
+        assert response.json()["source"] == "unavailable_fallback"
 
     assert get_circuit_breaker().current_state == "open"
 

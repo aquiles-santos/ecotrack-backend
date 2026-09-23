@@ -37,6 +37,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         correlation_id = request.headers.get(CORRELATION_ID_HEADER) or str(
             uuid.uuid4()
         )
+        request.state.correlation_id = correlation_id
         start = time.perf_counter()
 
         response = await call_next(request)

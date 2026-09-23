@@ -1,7 +1,8 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AirQualitySource(StrEnum):
@@ -27,7 +28,17 @@ class AirQualityResponse(BaseModel):
     lat: float
     lon: float
     pollutants: Pollutants
-    aqi: int = Field(..., ge=1, le=5)
+    aqi: int | None = Field(default=None, ge=1, le=5)
     source: AirQualitySource
     fetched_at: datetime
     stale: bool = False
+
+    @model_validator(mode="after")
+    def aqi_matches_source(self) -> Self:
+        if self.source is AirQualitySource.UNAVAILABLE_FALLBACK:
+            if self.aqi is not None:
+                raise ValueError("aqi must be absent for unavailable_fallback")
+            return self
+        if self.aqi is None:
+            raise ValueError("aqi is required when air quality data is available")
+        return self
