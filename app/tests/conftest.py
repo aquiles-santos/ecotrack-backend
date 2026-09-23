@@ -8,11 +8,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import Base, get_session
 from app.main import app
 from app.models.alert import Alert, ReadingCache
-from app.services.openweather_service import (
-    get_circuit_breaker,
-    reset_circuit_breaker,
-    set_http_client,
-)
+from app.services import geocode_service, openweather_service
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -57,7 +53,7 @@ def install_openweather_mock(
         transport=httpx.MockTransport(handler),
         timeout=3.0,
     )
-    set_http_client(client)
+    openweather_service.set_http_client(client)
     return client, requests
 
 
@@ -75,7 +71,7 @@ async def open_circuit_with_failures(
         assert response.status_code == 200
         assert response.json()["source"] == "unavailable_fallback"
 
-    assert get_circuit_breaker().current_state == "open"
+    assert openweather_service.get_circuit_breaker().current_state == "open"
 
 
 @pytest.fixture
@@ -91,13 +87,79 @@ def openweather_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
 
 
+OPEN_METEO_GEOCODE_RESPONSE = {
+    "results": [
+        {
+            "id": 3448439,
+            "name": "São Paulo",
+            "latitude": -23.5475,
+            "longitude": -46.6361,
+            "admin1": "São Paulo",
+            "country": "Brazil",
+            "country_code": "BR",
+        },
+        {
+            "id": 3451190,
+            "name": "Rio de Janeiro",
+            "latitude": -22.9064,
+            "longitude": -43.1822,
+            "admin1": "Rio de Janeiro",
+            "country": "Brazil",
+            "country_code": "BR",
+        },
+    ],
+    "generationtime_ms": 0.42,
+}
+
+
+def install_geocode_mock(
+    *,
+    response: httpx.Response | None = None,
+    side_effect: Exception | None = None,
+) -> tuple[httpx.AsyncClient, list[httpx.Request]]:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if side_effect is not None:
+            raise side_effect
+        return response or httpx.Response(200, json=OPEN_METEO_GEOCODE_RESPONSE)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        timeout=3.0,
+    )
+    geocode_service.set_http_client(client)
+    return client, requests
+
+
+async def open_geocode_circuit_with_failures(
+    client: AsyncClient,
+    *,
+    query: str = "São Paulo",
+) -> None:
+    for _ in range(3):
+        response = await client.get(
+            "/api/v1/geocode",
+            params={"q": query},
+        )
+        assert response.status_code == 200
+        assert response.json()["available"] is False
+
+    assert geocode_service.get_circuit_breaker().current_state == "open"
+
+
 @pytest.fixture(autouse=True)
 def reset_openweather_state() -> Generator[None, None, None]:
-    reset_circuit_breaker()
-    set_http_client(None)
+    openweather_service.reset_circuit_breaker()
+    geocode_service.reset_circuit_breaker()
+    openweather_service.set_http_client(None)
+    geocode_service.set_http_client(None)
     yield
-    reset_circuit_breaker()
-    set_http_client(None)
+    openweather_service.reset_circuit_breaker()
+    geocode_service.reset_circuit_breaker()
+    openweather_service.set_http_client(None)
+    geocode_service.set_http_client(None)
 
 
 @pytest_asyncio.fixture

@@ -12,6 +12,7 @@ from app.schemas.alert import (
     LatestReading,
     TargetPollutant,
 )
+from app.schemas.geocode import GeocodeResponse, GeocodeResult
 
 __all__ = [
     "AirQualityQuery",
@@ -21,6 +22,8 @@ __all__ = [
     "AlertRead",
     "AlertUpdate",
     "Criticality",
+    "GeocodeResponse",
+    "GeocodeResult",
     "LatestReading",
     "Pollutants",
     "TargetPollutant",
