@@ -2,13 +2,19 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, Numeric, String, func, select
+from sqlalchemy import DateTime, Enum, Numeric, String, case, cast, func, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-from app.schemas.alert import AlertCreate, AlertUpdate, TargetPollutant
+from app.schemas.alert import (
+    POLLUTANT_FIELD_MAP,
+    AlertCreate,
+    AlertUpdate,
+    Criticality,
+    TargetPollutant,
+)
 
 CACHE_TTL = timedelta(minutes=10)
 
@@ -75,15 +81,53 @@ def is_cache_fresh(
     return reference - fetched_at <= CACHE_TTL
 
 
+def _json_concentration(field_name: str):
+    pollutant = ReadingCache.payload_json["pollutants"][field_name].as_string()
+    component = ReadingCache.payload_json["components"][field_name].as_string()
+    return cast(func.coalesce(pollutant, component), Numeric)
+
+
+def _alert_concentration():
+    return case(
+        *[
+            (
+                Alert.target_pollutant == pollutant,
+                _json_concentration(field_name),
+            )
+            for pollutant, field_name in POLLUTANT_FIELD_MAP.items()
+        ]
+    )
+
+
 async def list_alerts(
     session: AsyncSession,
     skip: int = 0,
     limit: int = 50,
-) -> list[Alert]:
-    result = await session.execute(
-        select(Alert).order_by(Alert.created_at.desc()).offset(skip).limit(limit)
+    criticality: Criticality | None = None,
+) -> list[tuple[Alert, ReadingCache | None]]:
+    """Lista alertas já com o cache da coordenada (lat/lon em 4 casas).
+
+    O filtro de criticidade e a paginação acontecem no SQL, na mesma
+    leitura de cache. Alertas sem concentração conhecida ficam de fora
+    do filtro, porque a criticidade deles é nula.
+    """
+    concentration = _alert_concentration()
+    statement = (
+        select(Alert, ReadingCache)
+        .outerjoin(
+            ReadingCache,
+            (ReadingCache.lat == func.round(Alert.latitude, 4))
+            & (ReadingCache.lon == func.round(Alert.longitude, 4)),
+        )
+        .order_by(Alert.created_at.desc())
     )
-    return list(result.scalars().all())
+    if criticality is Criticality.WITHIN_LIMIT:
+        statement = statement.where(concentration <= Alert.concentration_limit)
+    elif criticality is Criticality.ABOVE_LIMIT:
+        statement = statement.where(concentration > Alert.concentration_limit)
+
+    result = await session.execute(statement.offset(skip).limit(limit))
+    return list(result.tuples().all())
 
 
 async def get_alert(session: AsyncSession, alert_id: uuid.UUID) -> Alert | None:

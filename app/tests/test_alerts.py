@@ -185,6 +185,41 @@ async def test_list_alerts_filters_by_criticality(
     assert body[0]["criticality"] == "above_limit"
 
 
+@pytest.mark.asyncio
+async def test_list_alerts_criticality_filter_is_paginated(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    for index, latitude in enumerate((-20.1, -21.2, -22.3)):
+        payload = {
+            **ALERT_PAYLOAD,
+            "local_name": f"Acima {index}",
+            "latitude": latitude,
+            "longitude": -43.1 - index,
+            "concentration_limit": 10.0,
+        }
+        await client.post("/api/v1/alerts", json=payload)
+        await alert_repo.upsert_cache(
+            db_session,
+            lat=payload["latitude"],
+            lon=payload["longitude"],
+            payload_json={"pollutants": {"pm2_5": 18.0}},
+            aqi=3,
+            fetched_at=datetime(2026, 3, 21, 12, 0, tzinfo=UTC),
+        )
+    await db_session.flush()
+
+    response = await client.get(
+        "/api/v1/alerts",
+        params={"criticality": "above_limit", "skip": 1, "limit": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["criticality"] == "above_limit"
+
+
 def test_alert_create_rejects_invalid_latitude() -> None:
     with pytest.raises(ValidationError):
         AlertCreate(

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.logging import RequestLoggingMiddleware, configure_logging
+from app.core.logging import RequestLoggingMiddleware, configure_logging, get_logger
 from app.core.security import get_cors_origins
 from app.routers.air_quality_router import router as air_quality_router
 from app.routers.alert_router import router as alert_router
@@ -55,9 +55,16 @@ async def http_exception_handler(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(
-    _request: Request,
-    _exc: Exception,
+    request: Request,
+    exc: Exception,
 ) -> JSONResponse:
+    get_logger().error(
+        "unhandled_exception",
+        error_type=type(exc).__name__,
+        error_message=str(exc),
+        route=request.url.path,
+        correlation_id=getattr(request.state, "correlation_id", None),
+    )
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},

@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pybreaker
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -27,12 +26,37 @@ CO_THRESHOLDS = (4400.0, 9400.0, 12400.0, 15400.0)
 
 OPENWEATHER_ERRORS = (httpx.HTTPError, ValueError, httpx.TimeoutException)
 
+
+class _OpenTimestampListener(pybreaker.CircuitBreakerListener):
+    """Guarda o instante em que o circuito abre, via listener público.
+
+    O half-open continua sendo o reset_timeout do pybreaker. Não lemos
+    o estado interno da biblioteca para decidir se a chamada está bloqueada.
+    """
+
+    def __init__(self) -> None:
+        self.opened_at: datetime | None = None
+
+    def state_change(
+        self,
+        cb: pybreaker.CircuitBreaker,
+        old_state: pybreaker.CircuitBreakerState | None,
+        new_state: pybreaker.CircuitBreakerState,
+    ) -> None:
+        if new_state.name == "open":
+            self.opened_at = datetime.now(UTC)
+        else:
+            self.opened_at = None
+
+
 _http_client: httpx.AsyncClient | None = None
+_open_listener = _OpenTimestampListener()
 _openweather_breaker = pybreaker.CircuitBreaker(
     fail_max=3,
     reset_timeout=30,
     name="openweather",
 )
+_openweather_breaker.add_listener(_open_listener)
 
 
 def set_http_client(client: httpx.AsyncClient | None) -> None:
@@ -55,20 +79,31 @@ def reset_circuit_breaker() -> None:
     _openweather_breaker.close()
 
 
-def _circuit_is_open_and_blocking(breaker: pybreaker.CircuitBreaker) -> bool:
+def _ensure_circuit_allows_call(breaker: pybreaker.CircuitBreaker) -> None:
     if breaker.current_state != "open":
-        return False
+        return
 
-    opened_at = breaker._state_storage.opened_at
+    opened_at = _open_listener.opened_at
     if opened_at is None:
-        return True
+        raise pybreaker.CircuitBreakerError("OpenWeather circuit open")
 
-    if opened_at.tzinfo is not None:
-        opened_at = opened_at.replace(tzinfo=None)
+    if datetime.now(UTC) < opened_at + timedelta(seconds=breaker.reset_timeout):
+        raise pybreaker.CircuitBreakerError("OpenWeather circuit open")
 
-    timeout = timedelta(seconds=breaker.reset_timeout)
-    now = datetime.now(UTC).replace(tzinfo=None)
-    return now < opened_at + timeout
+    breaker.half_open()
+
+
+def _record_failure(exc: Exception) -> None:
+    try:
+        get_circuit_breaker().call(_reraise, exc)
+    except pybreaker.CircuitBreakerError:
+        raise
+    except Exception:
+        return
+
+
+def _record_success() -> None:
+    get_circuit_breaker().call(lambda: None)
 
 
 def _pollutant_level(value: float, thresholds: tuple[float, ...]) -> int:
@@ -187,12 +222,14 @@ class OpenWeatherService:
         if cache is not None:
             return cache_to_response(cache, lat, lon, stale=True)
 
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "available": False,
-                "message": "openweather_unavailable",
-            },
+        return AirQualityResponse(
+            lat=lat,
+            lon=lon,
+            pollutants=Pollutants(),
+            aqi=None,
+            source=AirQualitySource.UNAVAILABLE_FALLBACK,
+            fetched_at=datetime.now(UTC),
+            stale=False,
         )
 
     async def _fetch_with_resilience(
@@ -201,8 +238,7 @@ class OpenWeatherService:
         lon: float,
     ) -> tuple[Pollutants, datetime]:
         breaker = get_circuit_breaker()
-        if _circuit_is_open_and_blocking(breaker):
-            raise pybreaker.CircuitBreakerError("OpenWeather circuit open")
+        _ensure_circuit_allows_call(breaker)
 
         last_exc: Exception | None = None
         for attempt in range(OPENWEATHER_RETRY_ATTEMPTS):
@@ -210,22 +246,21 @@ class OpenWeatherService:
                 result = await self._fetch_from_openweather(lat, lon)
             except OPENWEATHER_ERRORS as exc:
                 last_exc = exc
+                try:
+                    _record_failure(exc)
+                except pybreaker.CircuitBreakerError:
+                    raise
                 if attempt < OPENWEATHER_RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(
                         OPENWEATHER_RETRY_BACKOFF_SECONDS * (2**attempt)
                     )
                 continue
 
-            breaker.call(lambda: None)
+            _record_success()
             return result
 
         if last_exc is None:
             raise RuntimeError("OpenWeather fetch failed without exception")
-
-        try:
-            breaker.call(_reraise, last_exc)
-        except pybreaker.CircuitBreakerError:
-            raise
         raise last_exc
 
     async def _fetch_from_openweather(
