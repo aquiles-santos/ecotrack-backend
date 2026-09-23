@@ -33,9 +33,9 @@ async def test_air_quality_returns_429_with_retry_after(
     low_throttle_settings: None,
     openweather_settings: None,
 ) -> None:
-    from app.tests.test_air_quality import OPENWEATHER_RESPONSE, _install_openweather_mock
+    from app.tests.conftest import install_openweather_mock
 
-    mock_client, _ = _install_openweather_mock()
+    mock_client, _ = install_openweather_mock()
     set_http_client(mock_client)
 
     for _ in range(2):
