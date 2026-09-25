@@ -4,6 +4,8 @@ API principal do **EcoTrack** — plataforma de monitoramento de qualidade do ar
 
 > **Segurança:** a chave `OPENWEATHER_API_KEY` existe **somente** no backend (`.env`, fora do git). O frontend nunca recebe nem envia a chave.
 
+**Como executar:** passo a passo completo em [docs/COMO_EXECUTAR.md](docs/COMO_EXECUTAR.md) (API sozinha, stack com UI e desenvolvimento local).
+
 ## Stack
 
 | Camada          | Tecnologia                               |
@@ -66,6 +68,7 @@ flowchart TB
 | `DELETE` | `/api/v1/alerts/{id}`           | Remove alerta                                    |
 | `GET`    | `/api/v1/air-quality?lat=&lon=` | Qualidade do ar (cache → OpenWeather → fallback) |
 | `GET`    | `/api/v1/geocode?q=&limit=`     | Geocodificação por nome (Open-Meteo, sem chave)  |
+| `GET`    | `/api/v1/pollutants`            | Glossário estático dos poluentes (nome e descrição) |
 
 Documentação interativa: http://localhost:8000/docs
 
@@ -109,6 +112,12 @@ No Docker Compose, `DATABASE_URL` e `CORS_ORIGINS` já vêm definidos para a red
 
 Requisito: Docker Engine ou Docker Desktop com integração WSL2.
 
+Detalhes, dois caminhos e troubleshooting: [docs/COMO_EXECUTAR.md](docs/COMO_EXECUTAR.md).
+
+**Demo com UI:** use o compose do repositório irmão `ecotrack-frontend` (`docker compose up --build` na raiz dele). A interface fica em http://localhost:8080.
+
+**Só API + banco** (desenvolvimento, Swagger ou `npm run dev` no frontend):
+
 ```bash
 cp .env.example .env
 # Edite .env e defina OPENWEATHER_API_KEY
@@ -116,8 +125,12 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- API: http://localhost:8000/docs
+- Swagger: http://localhost:8000/docs
 - PostgreSQL: `localhost:5432` (user/senha/db: `ecotrack`)
+
+Para parar: `docker compose down`.
+
+**Não suba** este compose **e** o do frontend ao mesmo tempo — conflitam nas portas **5432** e **8000**.
 
 O container `ecotrack-api` executa `alembic upgrade head` automaticamente na subida.
 
@@ -166,7 +179,7 @@ app/
   core/                   # config, database, logging, security
   models/alert.py         # Alert, ReadingCache + repositório
   schemas/                # Pydantic (alert, air_quality, geocode)
-  routers/                # alert_router, air_quality_router, geocode_router
+  routers/                # alert_router, air_quality_router, geocode_router, pollutant_router
   services/               # alert_service, openweather_service, geocode_service
   tests/                  # conftest, test_alerts, test_air_quality, test_geocode
 alembic/                  # migrações PostgreSQL
