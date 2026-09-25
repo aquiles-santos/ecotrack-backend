@@ -9,6 +9,7 @@ from app.core.security import get_cors_origins
 from app.routers.air_quality_router import router as air_quality_router
 from app.routers.alert_router import router as alert_router
 from app.routers.geocode_router import router as geocode_router
+from app.routers.pollutant_router import router as pollutant_router
 
 configure_logging()
 
@@ -30,6 +31,7 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(alert_router, prefix="/api/v1")
 app.include_router(air_quality_router, prefix="/api/v1")
 app.include_router(geocode_router, prefix="/api/v1")
+app.include_router(pollutant_router, prefix="/api/v1")
 
 
 @app.exception_handler(RequestValidationError)

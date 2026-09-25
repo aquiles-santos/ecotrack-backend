@@ -99,35 +99,47 @@ def _alert_concentration():
     )
 
 
-async def list_alerts(
-    session: AsyncSession,
-    skip: int = 0,
-    limit: int = 50,
-    criticality: Criticality | None = None,
-) -> list[tuple[Alert, ReadingCache | None]]:
-    """Lista alertas já com o cache da coordenada (lat/lon em 4 casas).
+def _filtered_alerts(criticality: Criticality | None):
+    """Alertas com o cache da coordenada e o filtro de criticidade.
 
-    O filtro de criticidade e a paginação acontecem no SQL, na mesma
-    leitura de cache. Alertas sem concentração conhecida ficam de fora
-    do filtro, porque a criticidade deles é nula.
+    Alertas sem concentração conhecida ficam de fora do filtro, porque
+    a criticidade deles é nula. A junção é 1:1 (PK do cache é lat+lon).
     """
     concentration = _alert_concentration()
-    statement = (
-        select(Alert, ReadingCache)
-        .outerjoin(
-            ReadingCache,
-            (ReadingCache.lat == func.round(Alert.latitude, 4))
-            & (ReadingCache.lon == func.round(Alert.longitude, 4)),
-        )
-        .order_by(Alert.created_at.desc())
+    statement = select(Alert, ReadingCache).outerjoin(
+        ReadingCache,
+        (ReadingCache.lat == func.round(Alert.latitude, 4))
+        & (ReadingCache.lon == func.round(Alert.longitude, 4)),
     )
     if criticality is Criticality.WITHIN_LIMIT:
         statement = statement.where(concentration <= Alert.concentration_limit)
     elif criticality is Criticality.ABOVE_LIMIT:
         statement = statement.where(concentration > Alert.concentration_limit)
+    return statement
 
+
+async def list_alerts(
+    session: AsyncSession,
+    skip: int = 0,
+    limit: int = 50,
+    criticality: Criticality | None = None,
+) -> tuple[list[tuple[Alert, ReadingCache | None]], int]:
+    """Lista uma página e o total que casa com o mesmo filtro.
+
+    Ordenação estável: `created_at` descendente e `id` como desempate.
+    `skip` além do total devolve lista vazia — nunca o último registro.
+    """
+    filtered = _filtered_alerts(criticality)
+    count_result = await session.execute(
+        select(func.count()).select_from(filtered.order_by(None).subquery())
+    )
+    total = int(count_result.scalar_one())
+    if skip >= total:
+        return [], total
+
+    statement = filtered.order_by(Alert.created_at.desc(), Alert.id.desc())
     result = await session.execute(statement.offset(skip).limit(limit))
-    return list(result.tuples().all())
+    return list(result.tuples().all()), total
 
 
 async def get_alert(session: AsyncSession, alert_id: uuid.UUID) -> Alert | None:

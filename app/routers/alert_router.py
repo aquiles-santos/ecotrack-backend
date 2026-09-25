@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
-from app.schemas.alert import AlertCreate, AlertRead, AlertUpdate, Criticality
+from app.schemas.alert import (
+    AlertCreate,
+    AlertListResponse,
+    AlertRead,
+    AlertUpdate,
+    Criticality,
+)
 from app.services.alert_service import AlertService
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -20,13 +26,13 @@ def get_alert_service(session: SessionDep) -> AlertService:
 AlertServiceDep = Annotated[AlertService, Depends(get_alert_service)]
 
 
-@router.get("", response_model=list[AlertRead])
+@router.get("", response_model=AlertListResponse)
 async def list_alerts(
     service: AlertServiceDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     criticality: Annotated[Criticality | None, Query()] = None,
-) -> list[AlertRead]:
+) -> AlertListResponse:
     return await service.list_alerts(skip=skip, limit=limit, criticality=criticality)
 
 

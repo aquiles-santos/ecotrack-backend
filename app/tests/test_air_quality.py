@@ -408,3 +408,16 @@ async def test_get_air_quality_unavailable_without_cache_returns_fallback(
     assert body["lat"] == -23.5505
     assert body["lon"] == -46.6333
     assert "Traceback" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_get_pollutants_returns_meanings(client: AsyncClient) -> None:
+    response = await client.get("/api/v1/pollutants")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"pm2_5", "pm10", "co", "no2", "o3"}
+    for entry in body.values():
+        assert entry["name"]
+        assert entry["description"]
+    assert "PM2.5" in body["pm2_5"]["name"]

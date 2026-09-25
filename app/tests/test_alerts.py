@@ -42,8 +42,10 @@ async def test_list_alerts_returns_created_alert(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 1
-    assert body[0]["local_name"] == ALERT_PAYLOAD["local_name"]
+    assert body["total"] == 1
+    assert body["has_more"] is False
+    assert len(body["items"]) == 1
+    assert body["items"][0]["local_name"] == ALERT_PAYLOAD["local_name"]
 
 
 @pytest.mark.asyncio
@@ -106,11 +108,32 @@ async def test_list_alerts_pagination(client: AsyncClient) -> None:
         payload = {**ALERT_PAYLOAD, "local_name": f"Local {index}"}
         await client.post("/api/v1/alerts", json=payload)
 
-    response = await client.get("/api/v1/alerts", params={"skip": 1, "limit": 1})
+    seen_ids: list[str] = []
+    for skip in range(3):
+        response = await client.get(
+            "/api/v1/alerts",
+            params={"skip": skip, "limit": 1},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["page"] == skip + 1
+        assert body["limit"] == 1
+        assert body["total"] == 3
+        assert body["total_pages"] == 3
+        assert body["has_more"] is (skip < 2)
+        assert len(body["items"]) == 1
+        seen_ids.append(body["items"][0]["id"])
 
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body) == 1
+    assert len(set(seen_ids)) == 3
+
+    beyond = await client.get("/api/v1/alerts", params={"skip": 3, "limit": 1})
+    assert beyond.status_code == 200
+    tail = beyond.json()
+    assert tail["items"] == []
+    assert tail["page"] == 4
+    assert tail["total"] == 3
+    assert tail["total_pages"] == 3
+    assert tail["has_more"] is False
 
 
 @pytest.mark.asyncio
@@ -132,7 +155,7 @@ async def test_list_alerts_includes_latest_reading_from_cache(
     response = await client.get("/api/v1/alerts")
 
     assert response.status_code == 200
-    alert = response.json()[0]
+    alert = response.json()["items"][0]
     assert alert["latest_reading"] is not None
     assert alert["latest_reading"]["pollutants"]["pm2_5"] == 12.5
     assert alert["latest_reading"]["aqi"] == 2
@@ -180,9 +203,10 @@ async def test_list_alerts_filters_by_criticality(
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 1
-    assert body[0]["local_name"] == "Acima do limite"
-    assert body[0]["criticality"] == "above_limit"
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["local_name"] == "Acima do limite"
+    assert body["items"][0]["criticality"] == "above_limit"
 
 
 @pytest.mark.asyncio
@@ -216,8 +240,10 @@ async def test_list_alerts_criticality_filter_is_paginated(
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 1
-    assert body[0]["criticality"] == "above_limit"
+    assert body["total"] == 3
+    assert body["has_more"] is True
+    assert len(body["items"]) == 1
+    assert body["items"][0]["criticality"] == "above_limit"
 
 
 def test_alert_create_rejects_invalid_latitude() -> None:
@@ -300,7 +326,7 @@ async def test_alert_crud_unaffected_when_openweather_circuit_is_open(
 
         list_response = await client.get("/api/v1/alerts")
         assert list_response.status_code == 200
-        assert len(list_response.json()) == 1
+        assert len(list_response.json()["items"]) == 1
 
         update_response = await client.put(
             f"/api/v1/alerts/{alert_id}",

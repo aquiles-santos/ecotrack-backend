@@ -1,3 +1,4 @@
+import math
 import uuid
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ from app.schemas.air_quality import Pollutants
 from app.schemas.alert import (
     POLLUTANT_FIELD_MAP,
     AlertCreate,
+    AlertListResponse,
     AlertRead,
     AlertUpdate,
     Criticality,
@@ -96,17 +98,26 @@ class AlertService:
         skip: int = 0,
         limit: int = 50,
         criticality: Criticality | None = None,
-    ) -> list[AlertRead]:
-        rows = await alert_repo.list_alerts(
+    ) -> AlertListResponse:
+        rows, total = await alert_repo.list_alerts(
             self._session,
             skip=skip,
             limit=limit,
             criticality=criticality,
         )
-        return [
+        items = [
             await build_alert_read(self._session, alert, cache, cache_loaded=True)
             for alert, cache in rows
         ]
+        total_pages = math.ceil(total / limit) if total else 0
+        return AlertListResponse(
+            items=items,
+            page=(skip // limit) + 1,
+            limit=limit,
+            total=total,
+            total_pages=total_pages,
+            has_more=skip + len(items) < total,
+        )
 
     async def create_alert(self, data: AlertCreate) -> AlertRead:
         alert = await alert_repo.create_alert(self._session, data)
