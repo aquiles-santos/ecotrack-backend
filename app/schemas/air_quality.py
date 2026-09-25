@@ -19,6 +19,21 @@ class Pollutants(BaseModel):
     o3: float | None = None
 
 
+class PollutantMeaning(BaseModel):
+    name: str
+    description: str
+
+
+class PollutantGlossary(BaseModel):
+    """Significado de cada chave de `Pollutants`."""
+
+    pm2_5: PollutantMeaning
+    pm10: PollutantMeaning
+    co: PollutantMeaning
+    no2: PollutantMeaning
+    o3: PollutantMeaning
+
+
 class AirQualityQuery(BaseModel):
     lat: float = Field(..., ge=-90, le=90)
     lon: float = Field(..., ge=-180, le=180)

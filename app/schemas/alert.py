@@ -64,3 +64,14 @@ class AlertRead(BaseModel):
     updated_at: datetime
     latest_reading: LatestReading | None = None
     criticality: Criticality | None = None
+
+
+class AlertListResponse(BaseModel):
+    """Página de GET /alerts. `items` vazio quando `skip` passa do total."""
+
+    items: list[AlertRead]
+    page: int = Field(..., ge=1)
+    limit: int = Field(..., ge=1)
+    total: int = Field(..., ge=0)
+    total_pages: int = Field(..., ge=0)
+    has_more: bool
