@@ -4,7 +4,46 @@ API principal do **EcoTrack** — plataforma de monitoramento de qualidade do ar
 
 > **Segurança:** a chave `OPENWEATHER_API_KEY` existe **somente** no backend (`.env`, fora do git). O frontend nunca recebe nem envia a chave.
 
-**Como executar:** passo a passo completo em [docs/COMO_EXECUTAR.md](docs/COMO_EXECUTAR.md) (API sozinha, stack com UI e desenvolvimento local).
+## Comece aqui (~5 minutos)
+
+Use este fluxo se você clonou **apenas** este repositório e quer subir a API com o mínimo de passos.
+
+**Pré-requisito:** [Docker](https://docs.docker.com/get-docker/) com Compose (no Windows, Docker Desktop com WSL2).
+
+### 1. Chave OpenWeather (para `/air-quality`)
+
+1. Crie uma conta gratuita em https://openweathermap.org/api e ative a **Air Pollution API**.
+2. Em *My API keys*, copie a chave (pode levar alguns minutos até ficar ativa após o cadastro).
+3. Na raiz deste projeto:
+
+```bash
+cp .env.example .env
+```
+
+4. Abra `.env` no editor e substitua `your_openweather_api_key_here` pelo valor copiado em `OPENWEATHER_API_KEY=`.
+
+Sem chave válida, alertas e geocode funcionam; a leitura de qualidade do ar pode retornar fallback indisponível.
+
+### 2. Subir API + banco
+
+Na raiz do `ecotrack-backend`:
+
+```bash
+docker compose up --build
+```
+
+Aguarde os containers ficarem prontos. As migrações do banco rodam automaticamente na subida da API.
+
+### 3. Validar
+
+- Swagger: http://localhost:8000/docs
+- Parar: `docker compose down` (no mesmo diretório)
+
+### Quer a interface web (dashboard)?
+
+Isso exige o repositório irmão **`ecotrack-frontend`** na mesma pasta pai que este projeto (ex.: `code/ecotrack-backend` e `code/ecotrack-frontend`). Siga o **Caminho A** em [docs/COMO_EXECUTAR.md](docs/COMO_EXECUTAR.md). **Não** suba o compose daqui e o do frontend ao mesmo tempo — as portas **5432** e **8000** entram em conflito.
+
+Mais cenários (UI em dev com Vite, Python local, problemas comuns): [docs/COMO_EXECUTAR.md](docs/COMO_EXECUTAR.md).
 
 ## Stack
 
@@ -110,13 +149,11 @@ No Docker Compose, `DATABASE_URL` e `CORS_ORIGINS` já vêm definidos para a red
 
 ## Execução com Docker (recomendado)
 
-Requisito: Docker Engine ou Docker Desktop com integração WSL2.
+Primeira vez? Use a seção [Comece aqui (~5 minutos)](#comece-aqui-5-minutos) acima.
 
-Detalhes, dois caminhos e troubleshooting: [docs/COMO_EXECUTAR.md](docs/COMO_EXECUTAR.md).
+**Demo com UI:** compose do repositório irmão `ecotrack-frontend` (`docker compose up --build` na raiz dele) — http://localhost:8080. Detalhes no [COMO_EXECUTAR](docs/COMO_EXECUTAR.md).
 
-**Demo com UI:** use o compose do repositório irmão `ecotrack-frontend` (`docker compose up --build` na raiz dele). A interface fica em http://localhost:8080.
-
-**Só API + banco** (desenvolvimento, Swagger ou `npm run dev` no frontend):
+**Só API + banco** (Swagger ou `npm run dev` no frontend):
 
 ```bash
 cp .env.example .env
